@@ -51,10 +51,11 @@ def predict(url, key):
     model = pickle.load(open('model.pkl', 'rb'))
     
     data = df_fraud[used_columns_9].astype(np.float64).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-    data = data.drop(['job_position_GURU', 'job_position_KARYAWAN HONORER'], axis=1)
     data = data.to_numpy()
+
     predictions = model.predict(data)
     ori['is_scammer'] = predictions
+    
     fbxdana.blob(key).upload_from_string(ori.to_csv(index=False), 'text/csv')
     
     print("PREDICTIONS: ", predictions)
