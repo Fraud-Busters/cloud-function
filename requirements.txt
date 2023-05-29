@@ -1,0 +1,8 @@
+functions-framework==3.3.0
+cloudevents==1.9.0
+gcsfs==2023.5.0
+google-cloud-storage==2.9.0
+numpy==1.24.3
+pandas==2.0.1
+scikit-learn==1.2.2
+
