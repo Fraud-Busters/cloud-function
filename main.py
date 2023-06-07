@@ -1,7 +1,7 @@
 from cloudevents.http import CloudEvent
 from app.processing import predict
 import functions_framework
-
+from app.helpers import set_status, set_status_out_key_preview, set_status_err
 
 # Triggered by a change in a storage bucket
 @functions_framework.cloud_event
@@ -32,15 +32,25 @@ def hello_gcs(cloud_event: CloudEvent) -> tuple:
     print(f"Created: {timeCreated}")
     print(f"Updated: {updated}")
 
-    if "_out" in name:
-        print("Skipping output file")
+    if ("_out.csv" in name) or (not "_in.csv" in name):
+        print("Skipping file")
         return event_id, event_type, bucket, name, metageneration, timeCreated, updated
 
     url = f"gs://{bucket}/{name}"
     key = name.replace("_in", "_out")
+    pred_id = name.split("/")[1]
+    pred_id = pred_id.split("_")[0]
+
     print(f"Key: {key}")
     print(f"URL: {url}")
-    predict(url, key)
+    try:
+        set_status(pred_id, "PROCESSING")
+        preview = predict(url, key)
+        set_status_out_key_preview(pred_id, "COMPLETED", key, preview)
+    except Exception as e:
+        print("ERROR: ", e)
+        set_status_err(pred_id, "FAILED_TO_PROCESS", str(e))
+
 
     return event_id, event_type, bucket, name, metageneration, timeCreated, updated
 

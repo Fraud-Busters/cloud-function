@@ -1,9 +1,6 @@
 import pandas as pd
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
+import os
 import numpy as np
-from sklearn.preprocessing import OneHotEncoder
-import pickle
 from .helpers import fbxdana
 from joblib import load
 
@@ -48,17 +45,38 @@ def predict(url, key):
     used_columns_9 += [col for col in df_fraud.columns if "std_" in col[:13]]
     # EDA features
     used_columns_9 += ['gender(num)', 'has_null', 'account_lifetime', 'is_group_1', 'is_group_2', 'is_group_3']
-    model = pickle.load(open('model.pkl', 'rb'))
-    
+
     data = df_fraud[used_columns_9].astype(np.float64).replace([np.inf, -np.inf], 0.0).fillna(0.0)
     data = data.to_numpy()
 
+    model = load(os.path.join("joblibs", "scammer_classifier.joblib"))
     predictions = model.predict(data)
+
+    proba = model.predict_proba(data)
+    print("PROBA: ", proba)
+
+    class_probabilities = proba[:, 1] #assuming only positive probability only
+    print("CLASS PROBABILITIES: ", class_probabilities)
+
+    ori = ori[['uid']]
     ori['is_scammer'] = predictions
+    ori['Certainty of Fraudster (Threshold)'] = class_probabilities
+
+    print("ORI COLUMNS: ", ori.columns)
+    
+    columns = [i for i in ori.columns]
+
+    print("COLUMNS: ", columns)
+
+    preview = ori.values.tolist()[:11]
+    preview = [columns] + preview
+
+    print("PREVIEW: ", preview)
+    print("ORI: ", ori)
     
     fbxdana.blob(key).upload_from_string(ori.to_csv(index=False), 'text/csv')
     
-    print("PREDICTIONS: ", predictions)
+    return preview
 
 
 # Define Functions
@@ -74,16 +92,14 @@ def handle_duplicate(df_fraud):
 def fill_missing_values(df_fraud):
     # Fill missing values in the DataFrame
     # impute null values in numerical features with median
-    num_imputer = SimpleImputer(strategy='median')
+    num_imputer = load(os.path.join("joblibs", "SimpleImputer_numerical.joblib"))
     num_cols = df_fraud.select_dtypes(include=['float64']).columns.tolist()
     df_fraud[num_cols] = num_imputer.fit_transform(df_fraud[num_cols])
 
     # impute null values in categorical features with mode
-    cat_imputer = SimpleImputer(strategy='most_frequent')
+    cat_imputer = load(os.path.join("joblibs", "SimpleImputer_categorical.joblib"))
     cat_cols = df_fraud.select_dtypes(include=['object']).columns.tolist()
     df_fraud[cat_cols] = cat_imputer.fit_transform(df_fraud[cat_cols])
-
-    
 
     return df_fraud
 
@@ -182,13 +198,18 @@ def map_job(job):
     return MAP[job]
 
 def remove_duplicate_categories(df_fraud):
-    
     # Map job position for train dataset
     df_fraud['job_position'] = df_fraud['job_position'].apply(lambda s : map_job(s))
 
+    low_count_job = ['KARYAWAN HONORER', 'GURU', 'SOPIR', 'OTHERS', 'NELAYAN / PERIKANAN',
+                       'BIDAN', 'PERAWAT', 'PENSIUN', 'MEKANIK', 'TUKANG JAHIT', 'DOSEN',
+                       'TUKANG KAYU', 'DOKTER', 'TUKANG BATU', 'PEMBANTU RUMAH TANGGA',
+                       'INDUSTRI', 'PELAUT', 'WARTAWAN', 'TUKANG LAS / PANDAI BESI',
+                       'PETERNAK', 'KONSTRUKSI', 'PENATA RAMBUT', 'BURUH NELAYAN / PERIKANAN',
+                       'TRANSPORTASI', 'PENSIUNAN', 'PENDETA', 'USTADZ / MUBALIGH',
+                       'TUKANG LISTRIK', 'PENGACARA', 'PERANCANG BUSANA', 'KONSULTAN',
+                       'PENATA RIAS', 'PENTERJEMAH', 'SENIMAN', 'AKUNTAN']
 
-    low_count_job = df_fraud['job_position'].value_counts() <= (100)
-    low_count_job = low_count_job[low_count_job].index
     df_fraud['job_position'] = df_fraud['job_position'].apply(lambda x : 'OTHERS' if x in low_count_job else x)
 
     return df_fraud
@@ -253,31 +274,20 @@ def add_new_feature(df_fraud):
     return df_fraud
 
 def feature_encoding(df_fraud):
-   #Label encoding
+   # Label encoding for gender
     mapping_gender = {
         'Female' : 0,
         'Male' : 1
     }
-
     df_fraud['gender(num)'] = df_fraud['gender'].map(mapping_gender)
 
-    #One hot encoding
-    for cat in ['job_position', 'source', 'user_transaction_group']:
-        enc = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
-        enc.fit(df_fraud[['job_position']])
-        new_cols = [f"job_position_{job}" for job in enc.categories_[0]]
+    # One hot encoding for job
+    enc = load(os.path.join("joblibs", f"OneHotEncoder_job_position.joblib"))
+    new_cols = [f"job_position_{job}" for job in enc.categories_[0]]
+    df_fraud[new_cols] = pd.DataFrame(enc.transform(df_fraud[['job_position']]),
+        columns=new_cols,
+        index = df_fraud.index)
 
-        # OHE for training data
-        df_fraud[new_cols] = pd.DataFrame(enc.transform(df_fraud[['job_position']]),
-                            columns=new_cols,
-                            index = df_fraud.index)
-        
-    enc = OneHotEncoder(sparse_output=False)
-    pd.DataFrame(enc.fit_transform(df_fraud[['job_position']]),
-                columns=[f"job_position_{job}" for job in enc.categories_[0]],
-                index = df_fraud.index
-                )
-    
     return df_fraud
 
     
@@ -288,14 +298,9 @@ def feature_scaling(df_fraud):
     'dormancy_max_gmt_pay_diff_days', 'dormancy_mean_gmt_pay_diff_days', 'dormancy_count_trx',
     'kyc_total_failed', 'kyc_total_revoked', 'avg_other_weight_1', 'centrality_outdegree_p2p',
     'centrality_indegree_p2p', 'centrality_outdegree_sendmoney']
+    new_scaled_cols = [f"std_{col}" for col in scaled_cols]
 
-    scalers_std = dict()
-
-    for col in scaled_cols:
-        scalers_std[col] = StandardScaler()
-
-        # fit scaler and scale train
-        df_fraud[f'std_{col}'] = scalers_std[col].fit_transform(df_fraud[col].values.reshape(len(df_fraud), 1))
+    scaler = load(os.path.join("joblibs", "StandardScaler.joblib"))
+    df_fraud[new_scaled_cols] = scaler.transform(df_fraud[scaled_cols])
 
     return df_fraud
-
