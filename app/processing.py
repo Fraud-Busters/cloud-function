@@ -248,11 +248,11 @@ def remove_redundant_features(df_fraud):
     
     return df_fraud
 
-def assign_group(in_, out_, threshold):
+def assign_group(in_, out_):
   """Assign a group to a data based on the ratio of in_ / out_"""
-  if in_ > out_ * threshold:
+  if in_ > out_ * 20:
     return 1
-  elif in_ * threshold < out_:
+  elif in_ * 2 < out_:
     return 2
   else:
     return 3
@@ -265,7 +265,7 @@ def add_new_feature(df_fraud):
         (df_fraud["trx_date"].astype("datetime64[ns]")) - (df_fraud["registereddate"].astype("datetime64[ns]"))
         ).dt.days
     df_fraud['user_transaction_group'] = df_fraud[['centrality_indegree_p2p', 'centrality_outdegree_p2p']].apply(
-        lambda row : assign_group(row['centrality_indegree_p2p'], row['centrality_outdegree_p2p'], 4),
+        lambda row : assign_group(row['centrality_indegree_p2p'], row['centrality_outdegree_p2p']),
         axis=1)
     df_fraud['is_group_1'] = df_fraud['user_transaction_group'] == 1
     df_fraud['is_group_2'] = df_fraud['user_transaction_group'] == 2
